@@ -2,10 +2,17 @@ import requests
 import sqlite3
 import json
 from datetime import datetime
+import os
+from dotenv import load_dotenv
+
 
 # --- CONFIGURATION ---
+
+load_dotenv()
+API_TOKEN = os.getenv("CLOUDLOOP_API_TOKEN")
+
 API_URL = "https://cloudloop-webhook.rkey.workers.dev/api/data"
-API_TOKEN = "cloudloop_api_pass_80opqh843tg" # Replace with your actual secret
+#API_TOKEN = "secret" # Replace with your actual secret
 LOCAL_DB_NAME = "satellite_mirror.db"
 
 # Optional Filters (Set to None if not needed)

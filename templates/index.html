@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Local Satellite Archive</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #1a73e8; color: white; }
+        .search-box { margin-bottom: 20px; }
+        input { padding: 8px; width: 250px; }
+        .payload { font-family: monospace; font-size: 0.85em; background: #f8f9fa; padding: 5px; display: block; max-width: 500px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 Local Satellite Archive</h1>
+        
+        <div class="search-box">
+            <form action="/">
+                <input type="text" name="device_id" placeholder="Filter by Device ID..." value="{{ device_filter }}">
+                <button type="submit">Filter</button>
+                <a href="/">Clear</a>
+            </form>
+        </div>
+
+        <table>
+            <tr>
+                <th>Local ID</th>
+                <th>Remote ID</th>
+                <th>Received At</th>
+                <th>Data</th>
+            </tr>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row['rowid'] }}</td>
+                <td>{{ row['remote_id'] }}</td>
+                <td>{{ row['received_at'] }}</td>
+                <td><span class="payload">{{ row['raw_payload'] }}</span></td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</body>
+</html>
