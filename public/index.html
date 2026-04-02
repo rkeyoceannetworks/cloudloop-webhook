@@ -3,67 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloudloop Dashboard</title>
+    <title>Satellite Fleet Dashboard</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
-        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
-        th { background-color: #0056b3; color: white; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; color: #1a73e8; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        button { background: #1a73e8; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #1557b0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 15px; border-bottom: 1px solid #ddd; text-align: left; }
+        th { background-color: #f8f9fa; color: #5f6368; font-weight: 600; text-transform: uppercase; font-size: 0.85em; }
+        tr:hover { background-color: #f1f3f4; }
+        .status-badge { background: #e6f4ea; color: #137333; padding: 5px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; }
+        .raw-data { font-family: monospace; font-size: 0.8em; color: #666; background: #f8f9fa; padding: 5px; border-radius: 4px; display: block; max-height: 60px; overflow-y: auto; }
     </style>
 </head>
 <body>
 
-    <h1>Satellite Data Dashboard</h1>
-    <p>Latest webhooks received from Ground Control.</p>
-    
-    <button onclick="fetchData()">Refresh Data</button>
+<div class="container">
+    <div class="header-bar">
+        <div>
+            <h1>🛰️ Satellite Fleet Dashboard</h1>
+            <p>Live telemetry and data from Ground Control Cloudloop.</p>
+        </div>
+        <button onclick="fetchData()">🔄 Refresh Data</button>
+    </div>
 
     <table>
         <thead>
             <tr>
-                <th>ID</th>
-                <th>Time Received</th>
-                <th>Raw JSON Payload</th>
+                <th>Time (Local)</th>
+                <th>Device ID</th>
+                <th>Status</th>
+                <th>Message / Payload</th>
             </tr>
         </thead>
         <tbody id="data-table-body">
-            <tr><td colspan="3">Loading data...</td></tr>
+            <tr><td colspan="4" style="text-align: center;">Loading satellite data...</td></tr>
         </tbody>
     </table>
+</div>
 
-    <script>
-        async function fetchData() {
-            const tbody = document.getElementById('data-table-body');
-            tbody.innerHTML = '<tr><td colspan="3">Loading data...</td></tr>';
+<script>
+    async function fetchData() {
+        const tbody = document.getElementById('data-table-body');
+        
+        try {
+            const response = await fetch('/data'); 
+            const data = await response.json();
 
-            try {
-                const response = await fetch('/data'); 
-                const data = await response.json();
+            tbody.innerHTML = ''; 
 
-                tbody.innerHTML = ''; 
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No transmissions received yet.</td></tr>';
+                return;
+            }
 
-                if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3">No data received yet.</td></tr>';
-                    return;
+            data.forEach(row => {
+                // 1. Parse the JSON safely
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(row.raw_payload);
+                } catch(e) {
+                    parsed = { error: "Could not parse JSON" };
                 }
 
-                data.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${row.id}</td>
-                        <td>${new Date(row.received_at).toLocaleString()}</td>
-                        <td><pre>${JSON.stringify(JSON.parse(row.raw_payload), null, 2)}</pre></td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } catch (error) {
-                console.error("Error:", error);
-                tbody.innerHTML = '<tr><td colspan="3" style="color:red;">Error loading data.</td></tr>';
-            }
-        }
+                // 2. Extract values intelligently (Handles both your simulation and real Cloudloop Lingo)
+                const time = new Date(row.received_at).toLocaleString();
+                
+                // Cloudloop often hides the IMEI under identity.hardware.imei
+                const deviceId = parsed.device_id || (parsed.identity && parsed.identity.hardware && parsed.identity.hardware.imei) || "Unknown Device";
+                
+                const status = parsed.status || "Transmitted";
+                
+                // Extract message or fallback to showing the raw JSON
+                const message = parsed.message || (parsed.payload && parsed.payload.message) || JSON.stringify(parsed);
 
-        window.onload = fetchData;
-    </script>
+                // 3. Build the table row
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${time}</strong></td>
+                    <td>${deviceId}</td>
+                    <td><span class="status-badge">${status}</span></td>
+                    <td><span class="raw-data">${message}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (error) {
+            console.error("Error:", error);
+            tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align: center;">Error loading data from database.</td></tr>';
+        }
+    }
+
+    window.onload = fetchData;
+</script>
+
 </body>
 </html>
-
