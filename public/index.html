@@ -12,11 +12,18 @@
         button { background: #1a73e8; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
         button:hover { background: #1557b0; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 15px; border-bottom: 1px solid #ddd; text-align: left; }
+        th, td { padding: 15px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
         th { background-color: #f8f9fa; color: #5f6368; font-weight: 600; text-transform: uppercase; font-size: 0.85em; }
         tr:hover { background-color: #f1f3f4; }
         .status-badge { background: #e6f4ea; color: #137333; padding: 5px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; }
-        .raw-data { font-family: monospace; font-size: 0.8em; color: #666; background: #f8f9fa; padding: 5px; border-radius: 4px; display: block; max-height: 60px; overflow-y: auto; }
+        .binary-badge { background: #fce8e6; color: #c5221f; padding: 5px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; display: inline-block;}
+        .raw-data { font-family: monospace; font-size: 0.9em; color: #333; background: #f8f9fa; padding: 8px; border-radius: 4px; display: block; word-break: break-all; }
+        
+        /* New styles for the JSON dropdown */
+        details { margin-top: 12px; }
+        summary { cursor: pointer; color: #1a73e8; font-size: 0.85em; font-weight: bold; outline: none; }
+        summary:hover { text-decoration: underline; }
+        .json-dump { font-family: monospace; font-size: 0.75em; color: #444; background: #2d2d2d; color: #a9b7c6; padding: 12px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -33,10 +40,10 @@
     <table>
         <thead>
             <tr>
-                <th>Time (Local)</th>
-                <th>Device ID</th>
-                <th>Status</th>
-                <th>Message / Payload</th>
+                <th style="width: 15%;">Time (Local)</th>
+                <th style="width: 15%;">Device ID</th>
+                <th style="width: 10%;">Status</th>
+                <th style="width: 60%;">Message / Payload</th>
             </tr>
         </thead>
         <tbody id="data-table-body">
@@ -46,6 +53,39 @@
 </div>
 
 <script>
+    // Helper function to safely escape HTML inside JSON so it doesn't break the page
+    function escapeHtml(unsafe) {
+        return (unsafe || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Smart function to detect Text vs Binary
+    function processPayload(msg) {
+        if (!msg) return "<em>No payload data</em>";
+        if (typeof msg !== 'string') return escapeHtml(JSON.stringify(msg));
+
+        // 1. Check if the string is purely Hexadecimal (common for satellite payloads)
+        const isHex = /^[0-9A-Fa-f]+$/.test(msg) && msg.length % 2 === 0 && msg.length > 0;
+
+        if (isHex) {
+            let decodedText = '';
+            for (let i = 0; i < msg.length; i += 2) {
+                decodedText += String.fromCharCode(parseInt(msg.substr(i, 2), 16));
+            }
+            
+            // 2. Check if the decoded text consists of standard printable keyboard characters
+            const isPrintable = /^[\x20-\x7E\r\n\t]+$/.test(decodedText);
+            
+            if (isPrintable) {
+                return escapeHtml(decodedText); // It was hex-encoded text!
+            } else {
+                return `<span class="binary-badge">🗜️ Binary File (${msg.length / 2} bytes)</span>`;
+            }
+        }
+
+        // If it's not Hex, just assume it's standard text
+        return escapeHtml(msg);
+    }
+
     async function fetchData() {
         const tbody = document.getElementById('data-table-body');
         
@@ -61,32 +101,38 @@
             }
 
             data.forEach(row => {
-                // 1. Parse the JSON safely
                 let parsed = {};
                 try {
                     parsed = JSON.parse(row.raw_payload);
                 } catch(e) {
-                    parsed = { error: "Could not parse JSON" };
+                    parsed = { error: "Could not parse JSON", raw: row.raw_payload };
                 }
 
-                // 2. Extract values intelligently (Handles both your simulation and real Cloudloop Lingo)
                 const time = new Date(row.received_at).toLocaleString();
-                
-                // Cloudloop often hides the IMEI under identity.hardware.imei
-                const deviceId = parsed.device_id || (parsed.identity && parsed.identity.hardware && parsed.identity.hardware.imei) || "Unknown Device";
-                
+                const deviceId = parsed.device_id || (parsed.identity && parsed.identity.hardware && parsed.identity.hardware.imei) || "Unknown";
                 const status = parsed.status || "Transmitted";
                 
-                // Extract message or fallback to showing the raw JSON
-                const message = parsed.message || (parsed.payload && parsed.payload.message) || JSON.stringify(parsed);
+                // Find the raw message string
+                const rawMessage = parsed.message || (parsed.payload && parsed.payload.message) || null;
+                
+                // Run it through our smart detector
+                const displayData = processPayload(rawMessage);
+                
+                // Format the full JSON nicely for the dropdown
+                const fullJsonString = escapeHtml(JSON.stringify(parsed, null, 2));
 
-                // 3. Build the table row
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td><strong>${time}</strong></td>
                     <td>${deviceId}</td>
                     <td><span class="status-badge">${status}</span></td>
-                    <td><span class="raw-data">${message}</span></td>
+                    <td>
+                        <span class="raw-data">${displayData}</span>
+                        <details>
+                            <summary>Show Full JSON</summary>
+                            <pre class="json-dump">${fullJsonString}</pre>
+                        </details>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
