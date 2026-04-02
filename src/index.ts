@@ -7,56 +7,69 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
-		// ... (Keep Route 1: /webhook as it is) ...
-
-		// UPDATED ROUTE 2: Searchable API for External Servers
-		if (url.pathname === "/api/data" && request.method === "GET") {
-			const apiKey = request.headers.get("X-API-Key") || url.searchParams.get("token");
-
-			if (apiKey !== env.WEBHOOK_SECRET) {
+		// --- ROUTE 1: WEBHOOK INGEST (POST) ---
+		if (url.pathname === "/webhook" && request.method === "POST") {
+			const auth = request.headers.get("X-Webhook-Secret") || url.searchParams.get("token");
+			if (auth !== env.WEBHOOK_SECRET) {
 				return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
 			}
 
-			// 1. Grab filters from the URL
-			const deviceId = url.searchParams.get("device_id");
-			const startDate = url.searchParams.get("start_date"); // Format: YYYY-MM-DD
-			const endDate = url.searchParams.get("end_date");     // Format: YYYY-MM-DD
-
 			try {
-				// 2. Build a dynamic SQL query
-				let query = "SELECT * FROM cloudloop_data WHERE 1=1";
-				const params: any[] = [];
+				const payload = await request.json();
+				const payloadString = JSON.stringify(payload);
+				await env.cloudloop_db.prepare(
+					"INSERT INTO cloudloop_data (raw_payload) VALUES (?)"
+				).bind(payloadString).run();
 
-				if (deviceId) {
-					// We use LIKE so it's a bit more flexible with IDs
-					query += " AND raw_payload LIKE ?"; 
-					params.push(`%${deviceId}%`);
-				}
-
-				if (startDate) {
-					query += " AND received_at >= ?";
-					params.push(`${startDate} 00:00:00`);
-				}
-
-				if (endDate) {
-					query += " AND received_at <= ?";
-					params.push(`${endDate} 23:59:59`);
-				}
-
-				query += " ORDER BY received_at DESC LIMIT 500";
-
-				// 3. Execute the filtered search
-				const { results } = await env.cloudloop_db.prepare(query).bind(...params).all();
-
-				return new Response(JSON.stringify(results), {
-					status: 200, headers: { "Content-Type": "application/json" }
-				});
-			} catch (error) {
-				return new Response(JSON.stringify({ error: "Search failed" }), { status: 500 });
+				return new Response(JSON.stringify({ status: "success" }), { status: 200 });
+			} catch (e) {
+				return new Response(JSON.stringify({ error: "Ingest failed" }), { status: 400 });
 			}
 		}
 
-		// ... (Keep Route 3: /data for the dashboard) ...
+		// --- ROUTE 2: EXTERNAL API (GET with Search/Filters) ---
+		if (url.pathname === "/api/data" && request.method === "GET") {
+			const auth = request.headers.get("X-API-Key") || url.searchParams.get("token");
+			if (auth !== env.WEBHOOK_SECRET) {
+				return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+			}
+
+			const deviceId = url.searchParams.get("device_id");
+			const startDate = url.searchParams.get("start_date");
+			const endDate = url.searchParams.get("end_date");
+
+			let query = "SELECT * FROM cloudloop_data WHERE 1=1";
+			const params: any[] = [];
+
+			if (deviceId) { query += " AND raw_payload LIKE ?"; params.push(`%${deviceId}%`); }
+			if (startDate) { query += " AND received_at >= ?"; params.push(`${startDate} 00:00:00`); }
+			if (endDate) { query += " AND received_at <= ?"; params.push(`${endDate} 23:59:59`); }
+			query += " ORDER BY received_at DESC LIMIT 500";
+
+			const { results } = await env.cloudloop_db.prepare(query).bind(...params).all();
+			return new Response(JSON.stringify(results), { 
+				status: 200, 
+				headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+			});
+		}
+
+		// --- ROUTE 3: DASHBOARD DATA (GET - Public for your Browser) ---
+		if (url.pathname === "/data" && request.method === "GET") {
+			try {
+				const { results } = await env.cloudloop_db.prepare(
+					"SELECT * FROM cloudloop_data ORDER BY received_at DESC LIMIT 50"
+				).all();
+				return new Response(JSON.stringify(results), { 
+					status: 200, 
+					headers: { 
+						"Content-Type": "application/json",
+						"Access-Control-Allow-Origin": "*" // Allows your dashboard to "see" the data
+					} 
+				});
+			} catch (e) {
+				return new Response(JSON.stringify({ error: "DB Error" }), { status: 500 });
+			}
+		}
 
 		return new Response("Not found", { status: 404 });
 	},
