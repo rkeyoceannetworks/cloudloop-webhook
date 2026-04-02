@@ -3,15 +3,23 @@
 <head>
     <title>Satellite Command Center</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eceff1; padding: 40px; }
-        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eceff1; padding: 20px; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 1200px; margin: auto; }
         h1 { color: #263238; margin-top: 0; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; table-layout: fixed; }
         th { text-align: left; background: #f8f9fa; color: #546e7a; padding: 12px; font-size: 0.8em; text-transform: uppercase; }
-        td { padding: 15px; border-bottom: 1px solid #cfd8dc; }
-        .device-id { font-weight: bold; color: #1a73e8; }
-        .status-pill { background: #e8f5e9; color: #2e7d32; padding: 4px 10px; border-radius: 50px; font-size: 0.8em; font-weight: bold; }
-        .timestamp { color: #90a4ae; font-size: 0.9em; }
+        td { padding: 15px; border-bottom: 1px solid #cfd8dc; vertical-align: top; word-wrap: break-word; }
+
+        /* Badges */
+        .decode-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7em; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
+        .badge-hex { background: #fce8e6; color: #c5221f; }
+        .badge-b64 { background: #e6f4ea; color: #137333; }
+        .badge-gzip { background: #e8f0fe; color: #1967d2; }
+        .binary-badge { background: #333; color: white; padding: 4px 10px; border-radius: 50px; font-size: 0.75em; }
+
+        .payload-display { font-family: monospace; font-size: 0.9em; color: #333; background: #f8f9fa; padding: 8px; border-radius: 4px; display: block; white-space: pre-wrap; }
+        .timestamp { color: #90a4ae; font-size: 0.85em; white-space: nowrap; }
     </style>
 </head>
 <body>
@@ -20,23 +28,82 @@
         <table>
             <thead>
                 <tr>
-                    <th>Time</th>
-                    <th>Device</th>
-                    <th>Status</th>
-                    <th>Decoded Message</th>
+                    <th style="width: 15%;">Time (UTC)</th>
+                    <th style="width: 15%;">Device</th>
+                    <th style="width: 70%;">Message Content</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in rows %}
                 <tr>
                     <td class="timestamp">{{ row['received_at'] }}</td>
-                    <td class="device-id">{{ row['device'] or 'Unknown' }}</td>
-                    <td><span class="status-pill">{{ row['status'] or 'N/A' }}</span></td>
-                    <td>{{ row['message'] or '---' }}</td>
+                    <td style="font-weight: bold; color: #1a73e8;">{{ row['device'] or 'Unknown' }}</td>
+                    <td>
+                        <div class="payload-container" data-raw="{{ row['message'] }}">
+                            <span class="payload-display">Processing...</span>
+                        </div>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+
+    <script>
+        function isPrintable(str) {
+            return /^[\x20-\x7E\r\n\t]*$/.test(str);
+        }
+
+        async function processPayload(msg) {
+            if (!msg || msg === 'None') return "<em>Empty Payload</em>";
+
+            // 1. Check HEX
+            const isHex = /^[0-9A-Fa-f]+$/.test(msg) && msg.length % 2 === 0;
+            if (isHex) {
+                let decodedHex = '';
+                for (let i = 0; i < msg.length; i += 2) {
+                    decodedHex += String.fromCharCode(parseInt(msg.substr(i, 2), 16));
+                }
+                if (isPrintable(decodedHex) && decodedHex.trim() !== '') {
+                    return `<span class="decode-badge badge-hex">Hex</span><br>${decodedHex}`;
+                }
+                return `<span class="binary-badge">🗜️ Binary (Hex)</span>`;
+            }
+
+            // 2. Check Base64
+            const isBase64 = /^[A-Za-z0-9+/]+={0,2}$/.test(msg) && msg.length % 4 === 0;
+            if (isBase64) {
+                try {
+                    const binString = atob(msg);
+                    
+                    // Check for GZIP Magic Bytes (1F 8B)
+                    if (binString.charCodeAt(0) === 0x1f && binString.charCodeAt(1) === 0x8b) {
+                        const uint8Array = new Uint8Array(binString.length);
+                        for (let i = 0; i < binString.length; i++) uint8Array[i] = binString.charCodeAt(i);
+                        
+                        const ds = new DecompressionStream("gzip");
+                        const writer = ds.writable.getWriter();
+                        writer.write(uint8Array); writer.close();
+                        const decompText = await new Response(ds.readable).text();
+                        
+                        return `<span class="decode-badge badge-gzip">Gzip Unzipped</span><br>${decompText}`;
+                    }
+                    
+                    if (isPrintable(binString) && binString.trim() !== '') {
+                        return `<span class="decode-badge badge-b64">Base64</span><br>${binString}`;
+                    }
+                } catch(e) {}
+            }
+
+            return msg; // Fallback to raw text
+        }
+
+        // Run the decoder for every row on the page
+        document.querySelectorAll('.payload-container').forEach(async (container) => {
+            const raw = container.getAttribute('data-raw');
+            const display = container.querySelector('.payload-display');
+            display.innerHTML = await processPayload(raw);
+        });
+    </script>
 </body>
 </html>
