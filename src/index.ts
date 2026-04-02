@@ -7,77 +7,57 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
-		// ROUTE 1: Receive POST webhooks from Cloudloop (Ingest)
-		if (url.pathname === "/webhook" && request.method === "POST") {
-			const headerSecret = request.headers.get("X-Webhook-Secret");
-			const urlSecret = url.searchParams.get("token");
-			
-			if (headerSecret !== env.WEBHOOK_SECRET && urlSecret !== env.WEBHOOK_SECRET) {
+		// ... (Keep Route 1: /webhook as it is) ...
+
+		// UPDATED ROUTE 2: Searchable API for External Servers
+		if (url.pathname === "/api/data" && request.method === "GET") {
+			const apiKey = request.headers.get("X-API-Key") || url.searchParams.get("token");
+
+			if (apiKey !== env.WEBHOOK_SECRET) {
 				return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
 			}
 
+			// 1. Grab filters from the URL
+			const deviceId = url.searchParams.get("device_id");
+			const startDate = url.searchParams.get("start_date"); // Format: YYYY-MM-DD
+			const endDate = url.searchParams.get("end_date");     // Format: YYYY-MM-DD
+
 			try {
-				const payload = await request.json();
-				const payloadString = JSON.stringify(payload);
+				// 2. Build a dynamic SQL query
+				let query = "SELECT * FROM cloudloop_data WHERE 1=1";
+				const params: any[] = [];
 
-				const { success } = await env.cloudloop_db.prepare(
-					"INSERT INTO cloudloop_data (raw_payload) VALUES (?)"
-				).bind(payloadString).run();
-
-				if (success) {
-					return new Response(JSON.stringify({ status: "success" }), {
-						status: 200, headers: { "Content-Type": "application/json" }
-					});
-				} else {
-					throw new Error("DB Insert Failed");
+				if (deviceId) {
+					// We use LIKE so it's a bit more flexible with IDs
+					query += " AND raw_payload LIKE ?"; 
+					params.push(`%${deviceId}%`);
 				}
-			} catch (error) {
-				return new Response(JSON.stringify({ status: "error" }), { status: 400 });
-			}
-		}
 
-		// ROUTE 2: Secure API for external servers to pull data (Egress)
-		if (url.pathname === "/api/data" && request.method === "GET") {
-			// Require the same secret password, but let them pass it as 'X-API-Key'
-			const apiKey = request.headers.get("X-API-Key");
-			const urlToken = url.searchParams.get("token");
+				if (startDate) {
+					query += " AND received_at >= ?";
+					params.push(`${startDate} 00:00:00`);
+				}
 
-			if (apiKey !== env.WEBHOOK_SECRET && urlToken !== env.WEBHOOK_SECRET) {
-				return new Response(JSON.stringify({ error: "Unauthorized: Invalid API Key" }), { 
-					status: 401, headers: { "Content-Type": "application/json" } 
-				});
-			}
+				if (endDate) {
+					query += " AND received_at <= ?";
+					params.push(`${endDate} 23:59:59`);
+				}
 
-			try {
-				// Fetch the latest 100 records for the external server
-				const { results } = await env.cloudloop_db.prepare(
-					"SELECT * FROM cloudloop_data ORDER BY received_at DESC LIMIT 100"
-				).all();
+				query += " ORDER BY received_at DESC LIMIT 500";
+
+				// 3. Execute the filtered search
+				const { results } = await env.cloudloop_db.prepare(query).bind(...params).all();
 
 				return new Response(JSON.stringify(results), {
 					status: 200, headers: { "Content-Type": "application/json" }
 				});
 			} catch (error) {
-				return new Response(JSON.stringify({ error: "Database fetch failed" }), { status: 500 });
+				return new Response(JSON.stringify({ error: "Search failed" }), { status: 500 });
 			}
 		}
 
-		// ROUTE 3: Serve the HTML Dashboard's data (Unprotected so your browser can view it easily)
-		if (url.pathname === "/data" && request.method === "GET") {
-			try {
-				const { results } = await env.cloudloop_db.prepare(
-					"SELECT * FROM cloudloop_data ORDER BY received_at DESC LIMIT 50"
-				).all();
+		// ... (Keep Route 3: /data for the dashboard) ...
 
-				return new Response(JSON.stringify(results), {
-					status: 200, headers: { "Content-Type": "application/json" }
-				});
-			} catch (error) {
-				return new Response(JSON.stringify({ error: "Fetch failed" }), { status: 500 });
-			}
-		}
-
-		// Fallback
 		return new Response("Not found", { status: 404 });
 	},
 };
