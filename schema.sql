@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS cloudloop_data;
+CREATE TABLE cloudloop_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_payload TEXT NOT NULL,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

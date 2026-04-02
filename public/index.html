@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloudloop Dashboard</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #0056b3; color: white; }
+    </style>
+</head>
+<body>
+
+    <h1>Satellite Data Dashboard</h1>
+    <p>Latest webhooks received from Ground Control.</p>
+    
+    <button onclick="fetchData()">Refresh Data</button>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Time Received</th>
+                <th>Raw JSON Payload</th>
+            </tr>
+        </thead>
+        <tbody id="data-table-body">
+            <tr><td colspan="3">Loading data...</td></tr>
+        </tbody>
+    </table>
+
+    <script>
+        async function fetchData() {
+            const tbody = document.getElementById('data-table-body');
+            tbody.innerHTML = '<tr><td colspan="3">Loading data...</td></tr>';
+
+            try {
+                const response = await fetch('/data'); 
+                const data = await response.json();
+
+                tbody.innerHTML = ''; 
+
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3">No data received yet.</td></tr>';
+                    return;
+                }
+
+                data.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${row.id}</td>
+                        <td>${new Date(row.received_at).toLocaleString()}</td>
+                        <td><pre>${JSON.stringify(JSON.parse(row.raw_payload), null, 2)}</pre></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error("Error:", error);
+                tbody.innerHTML = '<tr><td colspan="3" style="color:red;">Error loading data.</td></tr>';
+            }
+        }
+
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
+
