@@ -16,14 +16,19 @@
         th { background-color: #f8f9fa; color: #5f6368; font-weight: 600; text-transform: uppercase; font-size: 0.85em; }
         tr:hover { background-color: #f1f3f4; }
         .status-badge { background: #e6f4ea; color: #137333; padding: 5px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; }
-        .binary-badge { background: #fce8e6; color: #c5221f; padding: 5px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; display: inline-block;}
-        .raw-data { font-family: monospace; font-size: 0.9em; color: #333; background: #f8f9fa; padding: 8px; border-radius: 4px; display: block; word-break: break-all; }
+        .binary-badge { background: #fce8e6; color: #c5221f; padding: 5px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; display: inline-block; }
         
-        /* New styles for the JSON dropdown */
+        /* Badges for Decoded Data */
+        .decode-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.75em; font-weight: bold; margin-bottom: 8px; }
+        .badge-hex { background: #fce8e6; color: #c5221f; }
+        .badge-b64 { background: #e6f4ea; color: #137333; }
+        .badge-gzip { background: #e8f0fe; color: #1967d2; }
+
+        .raw-data { font-family: monospace; font-size: 0.9em; color: #333; background: #f8f9fa; padding: 8px; border-radius: 4px; display: block; word-break: break-all; }
         details { margin-top: 12px; }
         summary { cursor: pointer; color: #1a73e8; font-size: 0.85em; font-weight: bold; outline: none; }
         summary:hover { text-decoration: underline; }
-        .json-dump { font-family: monospace; font-size: 0.75em; color: #444; background: #2d2d2d; color: #a9b7c6; padding: 12px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; margin-top: 8px; }
+        .json-dump { font-family: monospace; font-size: 0.75em; background: #2d2d2d; color: #a9b7c6; padding: 12px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -53,36 +58,79 @@
 </div>
 
 <script>
-    // Helper function to safely escape HTML inside JSON so it doesn't break the page
     function escapeHtml(unsafe) {
         return (unsafe || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    // Smart function to detect Text vs Binary
-    function processPayload(msg) {
+    // Helper to check if a string is clean, readable text
+    function isPrintable(str) {
+        return /^[\x20-\x7E\r\n\t]*$/.test(str);
+    }
+
+    // Our new Async Smart Decoder
+    async function processPayload(msg) {
         if (!msg) return "<em>No payload data</em>";
         if (typeof msg !== 'string') return escapeHtml(JSON.stringify(msg));
 
-        // 1. Check if the string is purely Hexadecimal (common for satellite payloads)
+        // 1. Check HEX
         const isHex = /^[0-9A-Fa-f]+$/.test(msg) && msg.length % 2 === 0 && msg.length > 0;
-
         if (isHex) {
-            let decodedText = '';
+            let decodedHex = '';
             for (let i = 0; i < msg.length; i += 2) {
-                decodedText += String.fromCharCode(parseInt(msg.substr(i, 2), 16));
+                decodedHex += String.fromCharCode(parseInt(msg.substr(i, 2), 16));
             }
-            
-            // 2. Check if the decoded text consists of standard printable keyboard characters
-            const isPrintable = /^[\x20-\x7E\r\n\t]+$/.test(decodedText);
-            
-            if (isPrintable) {
-                return escapeHtml(decodedText); // It was hex-encoded text!
-            } else {
-                return `<span class="binary-badge">🗜️ Binary File (${msg.length / 2} bytes)</span>`;
+            if (isPrintable(decodedHex) && decodedHex.trim() !== '') {
+                return `<span class="decode-badge badge-hex">Hex Decoded Text</span><br>` + escapeHtml(decodedHex);
+            }
+            return `<span class="binary-badge">🗜️ Binary File (Hex: ${msg.length / 2} bytes)</span>`;
+        }
+
+        // 2. Check Base64
+        const isBase64 = /^[A-Za-z0-9+/]+={0,2}$/.test(msg) && msg.length % 4 === 0 && msg.length > 0;
+        if (isBase64) {
+            try {
+                const binString = atob(msg);
+                
+                // 2a. Check for GZIP Magic Bytes (1F 8B)
+                if (binString.length > 2 && binString.charCodeAt(0) === 0x1f && binString.charCodeAt(1) === 0x8b) {
+                    if (typeof DecompressionStream === 'undefined') {
+                        return `<span class="binary-badge">🗜️ Binary File (Gzipped Base64)</span><br><small>Update browser to auto-unzip</small>`;
+                    }
+                    try {
+                        const uint8Array = new Uint8Array(binString.length);
+                        for (let i = 0; i < binString.length; i++) {
+                            uint8Array[i] = binString.charCodeAt(i);
+                        }
+                        const ds = new DecompressionStream("gzip");
+                        const writer = ds.writable.getWriter();
+                        writer.write(uint8Array);
+                        writer.close();
+                        const response = new Response(ds.readable);
+                        const decompText = await response.text();
+                        
+                        if (isPrintable(decompText)) {
+                            return `<span class="decode-badge badge-gzip">📦 Gzip Unzipped</span><br>` + escapeHtml(decompText);
+                        } else {
+                            return `<span class="binary-badge">🗜️ Binary File (Gzipped: ${uint8Array.length} bytes)</span>`;
+                        }
+                    } catch(e) {
+                        return `<span class="binary-badge">🗜️ Binary File (Gzip corrupted)</span>`;
+                    }
+                }
+                
+                // 2b. If not Gzip, is the Base64 readable text?
+                if (isPrintable(binString) && binString.trim() !== '') {
+                    return `<span class="decode-badge badge-b64">Base64 Decoded Text</span><br>` + escapeHtml(binString);
+                }
+                
+                return `<span class="binary-badge">🗜️ Binary File (Base64: ${binString.length} bytes)</span>`;
+                
+            } catch(e) {
+                // If it fails to decode, ignore and fall back to raw string
             }
         }
 
-        // If it's not Hex, just assume it's standard text
+        // 3. Fallback: It's just a regular plain-text string
         return escapeHtml(msg);
     }
 
@@ -100,25 +148,20 @@
                 return;
             }
 
-            data.forEach(row => {
+            // We must use a for...of loop here to wait for the async decoding
+            for (const row of data) {
                 let parsed = {};
-                try {
-                    parsed = JSON.parse(row.raw_payload);
-                } catch(e) {
-                    parsed = { error: "Could not parse JSON", raw: row.raw_payload };
-                }
+                try { parsed = JSON.parse(row.raw_payload); } 
+                catch(e) { parsed = { error: "Parse Error", raw: row.raw_payload }; }
 
                 const time = new Date(row.received_at).toLocaleString();
                 const deviceId = parsed.device_id || (parsed.identity && parsed.identity.hardware && parsed.identity.hardware.imei) || "Unknown";
                 const status = parsed.status || "Transmitted";
-                
-                // Find the raw message string
                 const rawMessage = parsed.message || (parsed.payload && parsed.payload.message) || null;
                 
-                // Run it through our smart detector
-                const displayData = processPayload(rawMessage);
+                // Await the smart decoding process
+                const displayData = await processPayload(rawMessage);
                 
-                // Format the full JSON nicely for the dropdown
                 const fullJsonString = escapeHtml(JSON.stringify(parsed, null, 2));
 
                 const tr = document.createElement('tr');
@@ -135,7 +178,7 @@
                     </td>
                 `;
                 tbody.appendChild(tr);
-            });
+            }
         } catch (error) {
             console.error("Error:", error);
             tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align: center;">Error loading data from database.</td></tr>';
