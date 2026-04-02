@@ -1,5 +1,6 @@
 export interface Env {
 	cloudloop_db: D1Database;
+	WEBHOOK_SECRET: string;
 }
 
 export default {
@@ -7,6 +8,20 @@ export default {
 		const url = new URL(request.url);
 
 		if (url.pathname === "/webhook" && request.method === "POST") {
+			
+			// --- SECURITY CHECK START ---
+			// We check BOTH the headers and the URL for the password
+			const headerSecret = request.headers.get("X-Webhook-Secret");
+			const urlSecret = url.searchParams.get("token");
+			
+			if (headerSecret !== env.WEBHOOK_SECRET && urlSecret !== env.WEBHOOK_SECRET) {
+				return new Response(JSON.stringify({ error: "Unauthorized: Invalid Secret" }), { 
+					status: 401, 
+					headers: { "Content-Type": "application/json" } 
+				});
+			}
+			// --- SECURITY CHECK END ---
+
 			try {
 				const payload = await request.json();
 				const payloadString = JSON.stringify(payload);
