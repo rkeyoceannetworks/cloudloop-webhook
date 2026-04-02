@@ -1,3 +1,23 @@
+####added by ryan
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Local Database
+*.db
+
+# Node.js (Cloudflare dependencies)
+node_modules/
+.wrangler/
+dist/
+
+# Logs and OS junk
+*.log
+.DS_Store
+
+########end of ryan added item
+
 # Logs
 
 logs
